@@ -1,0 +1,194 @@
+openapi: 3.0.3
+info:
+  title: API de Catálogo e Inventario
+  version: 1.1.0
+  description: |
+    Microservicio interno que administra el catálogo de productos y su inventario.
+    CONTRATO PRIMERO: este archivo es la fuente de verdad. Las interfaces y DTOs
+    de Java se generan a partir de él; el código sólo implementa lo que aquí se define.
+  contact:
+    name: Bootcamp EspecializATT
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  - url: http://catalogo-service.apps.svc.cluster.local:8082
+    description: Kubernetes (red interna del clúster)
+  - url: http://localhost:8082
+    description: Desarrollo local
+# Servicio interno: no autentica por sí mismo. Sólo es alcanzable dentro del clúster;
+# la autenticación de usuarios ocurre en el borde (Kong + Authelia) a través de productos-service.
+security: []
+
+tags:
+  - name: Catalog
+    description: Consulta de productos e inventario
+
+paths:
+  /api/catalog:
+    get:
+      tags: [Catalog]
+      summary: Listar los productos del catálogo (paginado)
+      operationId: listCatalog
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: Página de productos del catálogo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/catalog/{productId}:
+    get:
+      tags: [Catalog]
+      summary: Obtener detalle e inventario de un producto
+      operationId: getCatalogByProductId
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          description: Identificador del producto (entero positivo)
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      responses:
+        '200':
+          description: Producto encontrado en el catálogo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  parameters:
+    Page:
+      name: page
+      in: query
+      required: false
+      description: Número de página, empieza en 0
+      schema:
+        type: integer
+        format: int32
+        minimum: 0
+        default: 0
+    Size:
+      name: size
+      in: query
+      required: false
+      description: Elementos por página (máximo 100)
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  responses:
+    BadRequest:
+      description: Parámetros inválidos (por ejemplo, productId menor a 1)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Bad Request
+            status: 400
+            detail: "productId debe ser mayor o igual a 1"
+            instance: /api/catalog/0
+    NotFound:
+      description: El producto no existe en el catálogo
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Not Found
+            status: 404
+            detail: "No existe el producto con ID 999"
+            instance: /api/catalog/999
+
+  schemas:
+    CatalogResponse:
+      type: object
+      required: [productId, name, basePrice, stock]
+      properties:
+        productId:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+          example: "Laptop Pro 14"
+        basePrice:
+          # 'number' SIN 'format' -> el generador usa BigDecimal (correcto para dinero).
+          # En JSON sigue siendo un número: compatible con quien ya consume la API.
+          type: number
+          minimum: 0
+          description: Precio base en MXN, con 2 decimales
+          example: 25000.00
+        stock:
+          type: integer
+          format: int32
+          minimum: 0
+          example: 15
+
+    CatalogPage:
+      type: object
+      required: [items, page, size, totalElements, totalPages]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogResponse'
+        page:
+          type: integer
+          format: int32
+          example: 0
+        size:
+          type: integer
+          format: int32
+          example: 20
+        totalElements:
+          type: integer
+          format: int64
+          example: 3
+        totalPages:
+          type: integer
+          format: int32
+          example: 1
+
+    Problem:
+      description: Error con formato estándar RFC 9457 (Problem Details for HTTP APIs)
+      type: object
+      properties:
+        type:
+          type: string
+          example: about:blank
+        title:
+          type: string
+          example: Not Found
+        status:
+          type: integer
+          format: int32
+          example: 404
+        detail:
+          type: string
+          example: "No existe el producto con ID 999"
+        instance:
+          type: string
+          example: /api/catalog/999
