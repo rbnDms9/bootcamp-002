@@ -1,0 +1,192 @@
+openapi: 3.0.3
+info:
+  title: API de Descuentos
+  version: 1.1.0
+  description: |
+    Microservicio interno que administra los descuentos vigentes por producto.
+    CONTRATO PRIMERO: este archivo es la fuente de verdad. Las interfaces y DTOs
+    de Java se generan a partir de él; el código sólo implementa lo que aquí se define.
+  contact:
+    name: Bootcamp EspecializATT
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  - url: http://descuento-service.apps.svc.cluster.local:8081
+    description: Kubernetes (red interna del clúster)
+  - url: http://localhost:8081
+    description: Desarrollo local
+# Servicio interno: no autentica por sí mismo. Sólo es alcanzable dentro del clúster;
+# la autenticación de usuarios ocurre en el borde (Kong + Authelia) a través de productos-service.
+security: []
+
+tags:
+  - name: Discount
+    description: Consulta de descuentos por producto
+
+paths:
+  /api/discount:
+    get:
+      tags: [Discount]
+      summary: Listar los descuentos vigentes (paginado)
+      operationId: listDiscounts
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: Página de descuentos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscountPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/discount/{productId}:
+    get:
+      tags: [Discount]
+      summary: Obtener el descuento vigente de un producto
+      description: |
+        404 significa "el producto no tiene descuento". Quien consume esta API
+        (productos-service) debe interpretarlo como 0% y no como un error.
+      operationId: getDiscountByProductId
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          description: Identificador del producto (entero positivo)
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          example: 1
+      responses:
+        '200':
+          description: Descuento encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiscountResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  parameters:
+    Page:
+      name: page
+      in: query
+      required: false
+      description: Número de página, empieza en 0
+      schema:
+        type: integer
+        format: int32
+        minimum: 0
+        default: 0
+    Size:
+      name: size
+      in: query
+      required: false
+      description: Elementos por página (máximo 100)
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  responses:
+    BadRequest:
+      description: Parámetros inválidos (por ejemplo, productId menor a 1)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Bad Request
+            status: 400
+            detail: "productId debe ser mayor o igual a 1"
+            instance: /api/discount/0
+    NotFound:
+      description: El producto no tiene descuento vigente
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Not Found
+            status: 404
+            detail: "No hay descuento vigente para el producto con ID 3"
+            instance: /api/discount/3
+
+  schemas:
+    DiscountResponse:
+      type: object
+      required: [productId, percentage, description]
+      properties:
+        productId:
+          type: integer
+          format: int64
+          example: 1
+        percentage:
+          # 'number' SIN 'format' -> BigDecimal en Java. En JSON sigue siendo un número.
+          type: number
+          minimum: 0
+          maximum: 100
+          description: Porcentaje de descuento (0 a 100) con 2 decimales
+          example: 10.00
+        description:
+          type: string
+          minLength: 1
+          maxLength: 120
+          example: "Promo septiembre"
+
+    DiscountPage:
+      type: object
+      required: [items, page, size, totalElements, totalPages]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscountResponse'
+        page:
+          type: integer
+          format: int32
+          example: 0
+        size:
+          type: integer
+          format: int32
+          example: 20
+        totalElements:
+          type: integer
+          format: int64
+          example: 2
+        totalPages:
+          type: integer
+          format: int32
+          example: 1
+
+    Problem:
+      description: Error con formato estándar RFC 9457 (Problem Details for HTTP APIs)
+      type: object
+      properties:
+        type:
+          type: string
+          example: about:blank
+        title:
+          type: string
+          example: Not Found
+        status:
+          type: integer
+          format: int32
+          example: 404
+        detail:
+          type: string
+          example: "No hay descuento vigente para el producto con ID 3"
+        instance:
+          type: string
+          example: /api/discount/3
